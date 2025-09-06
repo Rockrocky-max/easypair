@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>演練組合配對產生器</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    input, textarea, label { margin: 5px; padding: 5px; }
+    button { margin: 5px; padding: 6px 12px; cursor: pointer; }
+    .pair { margin: 5px 0; }
+    #history { width: 100%; height: 140px; }
+    .muted { color: #666; font-size: 12px; }
+    table { border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: center; }
+    th { background: #f0f0f0; }
+    .highlight { background: #c8f7c5; }
+  </style>
+</head>
+<body>
+  <h2>演練組合配對產生器</h2>
+
+  <h3>人員名單</h3>
+  <div id="peopleList"></div>
+  <button onclick="addPerson()">➕ 新增人員</button>
+  <button onclick="removePerson()">➖ 刪除人員</button>
+  <div class="muted">小提醒：空白姓名不會被列入配對。</div>
+
+  <h3>歷史配對紀錄 (請輸入過去組合，用逗號或換行分隔)</h3>
+  <textarea id="history" placeholder="例：第1週 柳逸家-吳習賓, 張喬涵-郭瀞月"></textarea>
+
+  <h3>設定</h3>
+  <label>
+    <input type="checkbox" id="allowRepeats"> 容許重複配對（若完全排除失敗，放寬條件並標記⚠️）
+  </label>
+
+  <br><br>
+  <button onclick="generatePairs()">產生配對</button>
+
+  <h3>配對結果：</h3>
+  <div id="pairs"></div>
+
+  <h3>配對關係矩陣表：</h3>
+  <div id="matrix"></div>
+
+  <script>
+    const peopleListDiv = document.getElementById('peopleList');
+    let people = ["柳逸家", "吳習賓", "張喬涵", "郭瀞月", "林苡姍", "鄔宜樺", "呂文勝", "許雅嵐", "蔡岢翰", "陳彥萍", "陳紫璇", "楊文益"];
+
+    function renderPeopleInputs() {
+      peopleListDiv.innerHTML = '';
+      people.forEach((name, index) => {
+        const input = document.createElement('input');
+        input.value = name;
+        input.placeholder = '輸入姓名';
+        input.oninput = () => people[index] = input.value;
+        peopleListDiv.appendChild(input);
+      });
+    }
+
+    function addPerson() {
+      people.push('');
+      renderPeopleInputs();
+    }
+
+    function removePerson() {
+      if (people.length > 0) {
+        people.pop();
+        renderPeopleInputs();
+      }
+    }
+
+    function shuffle(array) {
+      let currentIndex = array.length, randomIndex;
+      while (currentIndex !== 0) {
+        randomIndex = Math.floor(Math.random() * currentIndex);
+        currentIndex--;
+        [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+      }
+      return array;
+    }
+
+    function parseHistory() {
+      const text = document.getElementById('history').value;
+      const tokens = text.split(/[\n]/).map(s => s.trim()).filter(Boolean);
+      const historySet = new Set();
+      tokens.forEach(line => {
+        const parts = line.replace(/^第\d+週\s*/, '').split(',');
+        parts.forEach(p => {
+          const [a, b] = p.split('-').map(s => (s || '').trim());
+          if (a && b) {
+            const key = [a, b].sort().join('-');
+            historySet.add(key);
+          }
+        });
+      });
+      return historySet;
+    }
+
+    function getNextWeekNumber() {
+      const text = document.getElementById('history').value;
+      const matches = text.match(/第(\d+)週/gi);
+      if (!matches) return 1;
+      const nums = matches.map(m => parseInt(m.replace(/第|週/g, '')));
+      return Math.max(...nums) + 1;
+    }
+
+    function tryGeneratePairs(historySet, allowRepeats, activePeople) {
+      const shuffled = shuffle([...activePeople]);
+      const pairs = [];
+      for (let i = 0; i < shuffled.length; i += 2) {
+        if (i + 1 < shuffled.length) {
+          const pair = [shuffled[i], shuffled[i + 1]];
+          const key = pair.slice().sort().join('-');
+          if (!allowRepeats && historySet.has(key)) {
+            return null;
+          }
+          pairs.push(pair);
+        } else {
+          pairs.push([shuffled[i]]);
+        }
+      }
+      return pairs;
+    }
+
+    function generatePairs() {
+      const historySet = parseHistory();
+      const allowRepeats = document.getElementById('allowRepeats').checked;
+      const activePeople = people.map(n => (n || '').trim()).filter(Boolean);
+
+      const pairsDiv = document.getElementById('pairs');
+      pairsDiv.innerHTML = '';
+
+      if (activePeople.length === 0) {
+        pairsDiv.style.color = 'red';
+        pairsDiv.textContent = '請先輸入至少 1 位姓名。';
+        return;
+      }
+
+      let pairs = null;
+      let attempts = 0;
+      const maxAttempts = 1000;
+
+      while (!pairs && attempts < maxAttempts) {
+        pairs = tryGeneratePairs(historySet, false, activePeople);
+        attempts++;
+      }
+
+      if (!pairs && allowRepeats) {
+        pairs = tryGeneratePairs(historySet, true, activePeople);
+      }
+
+      if (!pairs) {
+        pairsDiv.style.color = 'red';
+        pairsDiv.textContent = '⚠️ 無法在 ' + maxAttempts + ' 次嘗試內產生完全不重複的配對。可勾選「容許重複配對」。';
+        return;
+      }
+
+      pairsDiv.style.color = 'black';
+      const newHistoryEntries = [];
+      const newPairKeys = [];
+
+      pairs.forEach(pair => {
+        const line = pair.join(' - ');
+        const canonical = pair.slice().sort().join('-');
+        const div = document.createElement('div');
+        div.className = 'pair';
+        if (historySet.has(canonical)) {
+          div.textContent = line + ' ⚠️ (重複)';
+        } else {
+          div.textContent = line;
+        }
+        pairsDiv.appendChild(div);
+        if (pair.length === 2) {
+          newHistoryEntries.push(line);
+          newPairKeys.push(canonical);
+        }
+      });
+
+      const weekNum = getNextWeekNumber();
+      const historyBox = document.getElementById('history');
+      const currentText = historyBox.value.trim();
+      const appended = `第${weekNum}週 ` + newHistoryEntries.join(', ');
+      historyBox.value = currentText ? currentText + "\n" + appended : appended;
+
+      renderMatrix(activePeople, historyBox.value, newPairKeys);
+    }
+
+    function renderMatrix(activePeople, historyText, newPairKeys) {
+      const tokens = historyText.split(/[\n]/).map(s => s.trim()).filter(Boolean);
+      const allPairs = new Set();
+      tokens.forEach(line => {
+        const parts = line.replace(/^第\d+週\s*/, '').split(',');
+        parts.forEach(p => {
+          const [a, b] = p.split('-').map(s => (s || '').trim());
+          if (a && b) allPairs.add([a, b].sort().join('-'));
+        });
+      });
+
+      const matrixDiv = document.getElementById('matrix');
+      if (activePeople.length === 0) {
+        matrixDiv.innerHTML = '';
+        return;
+      }
+
+      let html = '<table><tr><th></th>';
+      activePeople.forEach(p => { html += `<th>${p}</th>`; });
+      html += '</tr>';
+
+      activePeople.forEach(row => {
+        html += `<tr><th>${row}</th>`;
+        activePeople.forEach(col => {
+          if (row === col) {
+            html += '<td>-</td>';
+          } else {
+            const key = [row, col].sort().join('-');
+            if (newPairKeys && newPairKeys.includes(key)) {
+              html += '<td class="highlight">✔</td>';
+            } else if (allPairs.has(key)) {
+              html += '<td>✔</td>';
+            } else {
+              html += '<td></td>';
+            }
+          }
+        });
+        html += '</tr>';
+      });
+
+      html += '</table>';
+      matrixDiv.innerHTML = html;
+    }
+
+    renderPeopleInputs();
+  </script>
+</body>
+</html>

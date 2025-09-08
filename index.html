@@ -5,13 +5,13 @@
   <title>演練組合配對產生器</title>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input, textarea, label { margin: 5px; padding: 5px; }
+    input, textarea, label, select { margin: 5px; padding: 5px; }
     button { margin: 5px; padding: 6px 12px; cursor: pointer; }
     .pair { margin: 5px 0; }
     #history { width: 100%; height: 140px; }
     .muted { color: #666; font-size: 12px; }
     table { border-collapse: collapse; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: center; }
+    th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: center; min-width: 60px; }
     th { background: #f0f0f0; }
     .highlight { background: #c8f7c5; }
   </style>
@@ -40,11 +40,31 @@
   <div id="pairs"></div>
 
   <h3>配對關係矩陣表：</h3>
+  <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+    <label>排序方式：</label>
+    <select id="sortMode" onchange="onSortChange()">
+      <option value="name_asc">依姓名排序（A→Z）</option>
+      <option value="count_desc">依配對次數（高→低）</option>
+      <option value="count_asc">依配對次數（低→高）</option>
+    </select>
+    <label>
+      <input type="checkbox" id="filterNonZero" onchange="onSortChange()"> 只看大於 0 次
+    </label>
+    <label>
+      <input type="checkbox" id="filterNewOnly" onchange="onSortChange()"> 只看當週新配對
+    </label>
+  </div>
   <div id="matrix"></div>
+  <div style="margin-top:8px">
+    <button onclick="downloadMatrixCSV()">⬇️ 下載矩陣 (CSV)</button>
+    <button onclick="downloadMatrixXLSX()">⬇️ 下載矩陣 (Excel)</button>
+  </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script>
     const peopleListDiv = document.getElementById('peopleList');
     let people = ["柳逸家", "吳習賓", "張喬涵", "郭瀞月", "林苡姍", "鄔宜樺", "呂文勝", "許雅嵐", "蔡岢翰", "陳彥萍", "陳紫璇", "楊文益"];
+    let latestNewPairs = [];
 
     function renderPeopleInputs() {
       peopleListDiv.innerHTML = '';
@@ -79,21 +99,21 @@
       return array;
     }
 
-    function parseHistory() {
+    function parseHistoryCounts() {
       const text = document.getElementById('history').value;
-      const tokens = text.split(/[\n]/).map(s => s.trim()).filter(Boolean);
-      const historySet = new Set();
+      const tokens = text.split(/\n/).map(s => s.trim()).filter(Boolean);
+      const counts = {}; // key -> count
       tokens.forEach(line => {
         const parts = line.replace(/^第\d+週\s*/, '').split(',');
         parts.forEach(p => {
           const [a, b] = p.split('-').map(s => (s || '').trim());
           if (a && b) {
             const key = [a, b].sort().join('-');
-            historySet.add(key);
+            counts[key] = (counts[key] || 0) + 1;
           }
         });
       });
-      return historySet;
+      return counts;
     }
 
     function getNextWeekNumber() {
@@ -104,14 +124,14 @@
       return Math.max(...nums) + 1;
     }
 
-    function tryGeneratePairs(historySet, allowRepeats, activePeople) {
+    function tryGeneratePairs(countsMap, allowRepeats, activePeople) {
       const shuffled = shuffle([...activePeople]);
       const pairs = [];
       for (let i = 0; i < shuffled.length; i += 2) {
         if (i + 1 < shuffled.length) {
           const pair = [shuffled[i], shuffled[i + 1]];
           const key = pair.slice().sort().join('-');
-          if (!allowRepeats && historySet.has(key)) {
+          if (!allowRepeats && (countsMap[key] || 0) > 0) {
             return null;
           }
           pairs.push(pair);
@@ -123,7 +143,7 @@
     }
 
     function generatePairs() {
-      const historySet = parseHistory();
+      const countsMap = parseHistoryCounts();
       const allowRepeats = document.getElementById('allowRepeats').checked;
       const activePeople = people.map(n => (n || '').trim()).filter(Boolean);
 
@@ -141,12 +161,12 @@
       const maxAttempts = 1000;
 
       while (!pairs && attempts < maxAttempts) {
-        pairs = tryGeneratePairs(historySet, false, activePeople);
+        pairs = tryGeneratePairs(countsMap, false, activePeople);
         attempts++;
       }
 
       if (!pairs && allowRepeats) {
-        pairs = tryGeneratePairs(historySet, true, activePeople);
+        pairs = tryGeneratePairs(countsMap, true, activePeople);
       }
 
       if (!pairs) {
@@ -164,7 +184,7 @@
         const canonical = pair.slice().sort().join('-');
         const div = document.createElement('div');
         div.className = 'pair';
-        if (historySet.has(canonical)) {
+        if ((countsMap[canonical] || 0) > 0) {
           div.textContent = line + ' ⚠️ (重複)';
         } else {
           div.textContent = line;
@@ -176,60 +196,171 @@
         }
       });
 
+      latestNewPairs = newPairKeys;
+
       const weekNum = getNextWeekNumber();
       const historyBox = document.getElementById('history');
       const currentText = historyBox.value.trim();
       const appended = `第${weekNum}週 ` + newHistoryEntries.join(', ');
       historyBox.value = currentText ? currentText + "\n" + appended : appended;
 
-      renderMatrix(activePeople, historyBox.value, newPairKeys);
+      const updatedCounts = parseHistoryCounts();
+      renderMatrix(activePeople, updatedCounts, newPairKeys);
     }
 
-    function renderMatrix(activePeople, historyText, newPairKeys) {
-      const tokens = historyText.split(/[\n]/).map(s => s.trim()).filter(Boolean);
-      const allPairs = new Set();
-      tokens.forEach(line => {
-        const parts = line.replace(/^第\d+週\s*/, '').split(',');
-        parts.forEach(p => {
-          const [a, b] = p.split('-').map(s => (s || '').trim());
-          if (a && b) allPairs.add([a, b].sort().join('-'));
-        });
+    function renderMatrix(activePeople, countsMap, newPairKeys) {
+      const sortMode = document.getElementById('sortMode').value;
+      const filterNonZero = document.getElementById('filterNonZero').checked;
+      const filterNewOnly = document.getElementById('filterNewOnly').checked;
+
+      const personTotals = {};
+      activePeople.forEach(p => personTotals[p] = 0);
+      Object.keys(countsMap).forEach(k => {
+        const [a, b] = k.split('-');
+        if (personTotals[a] !== undefined) personTotals[a] += countsMap[k];
+        if (personTotals[b] !== undefined) personTotals[b] += countsMap[k];
       });
 
-      const matrixDiv = document.getElementById('matrix');
-      if (activePeople.length === 0) {
-        matrixDiv.innerHTML = '';
-        return;
+      let ordered = [...activePeople];
+      if (sortMode === 'count_desc') ordered.sort((x,y)=> (personTotals[y]||0) - (personTotals[x]||0) || x.localeCompare(y));
+      else if (sortMode === 'count_asc') ordered.sort((x,y)=> (personTotals[x]||0) - (personTotals[y]||0) || x.localeCompare(y));
+      else ordered.sort((x,y)=> x.localeCompare(y));
+
+      if (filterNonZero) {
+        ordered = ordered.filter(p => personTotals[p] > 0);
       }
 
+      const matrixDiv = document.getElementById('matrix');
       let html = '<table><tr><th></th>';
-      activePeople.forEach(p => { html += `<th>${p}</th>`; });
-      html += '</tr>';
+      ordered.forEach(p => { html += `<th>${p}</th>`; });
+      html += '<th>配對次數 (行)</th></tr>';
 
-      activePeople.forEach(row => {
+      ordered.forEach(row => {
         html += `<tr><th>${row}</th>`;
-        activePeople.forEach(col => {
+        ordered.forEach(col => {
           if (row === col) {
             html += '<td>-</td>';
           } else {
             const key = [row, col].sort().join('-');
-            if (newPairKeys && newPairKeys.includes(key)) {
-              html += '<td class="highlight">✔</td>';
-            } else if (allPairs.has(key)) {
-              html += '<td>✔</td>';
+            const count = countsMap[key] || 0;
+            const isNew = latestNewPairs.includes(key);
+            if (filterNewOnly) {
+              html += isNew ? `<td class="highlight">${count}</td>` : '<td></td>';
             } else {
-              html += '<td></td>';
+              if (isNew) html += `<td class="highlight">${count}</td>`;
+              else html += `<td>${count > 0 ? count : ''}</td>`;
             }
           }
         });
-        html += '</tr>';
+        const rowTotal = ordered.reduce((acc,col)=> acc + (countsMap[[row,col].sort().join('-')]||0), 0);
+        html += `<td>${rowTotal}</td></tr>`;
       });
+
+      html += '<tr><th>配對次數 (列)</th>';
+      ordered.forEach(col => {
+        const colTotal = ordered.reduce((acc,row)=> acc + (countsMap[[row,col].sort().join('-')]||0), 0);
+        html += `<td>${colTotal}</td>`;
+      });
+      const grandTotals = ordered.reduce((acc,row)=> acc + ordered.reduce((a,col)=> a + (countsMap[[row,col].sort().join('-')]||0), 0), 0);
+      html += `<td>${grandTotals}</td></tr>`;
 
       html += '</table>';
       matrixDiv.innerHTML = html;
+      matrixDiv.dataset.csv = JSON.stringify({ordered, countsMap});
+    }
+
+    function onSortChange() {
+      const activePeople = people.map(n => (n || '').trim()).filter(Boolean);
+      const countsMap = parseHistoryCounts();
+      renderMatrix(activePeople, countsMap, []);
+    }
+
+    function downloadMatrixCSV() {
+      const matrixDiv = document.getElementById('matrix');
+      if (!matrixDiv.dataset.csv) return;
+      const data = JSON.parse(matrixDiv.dataset.csv);
+      const ordered = data.ordered;
+      const pairs = data.countsMap;
+
+      const header = ["", ...ordered, "配對次數 (行)"];
+      const rows = [header];
+      ordered.forEach(row => {
+        const rowArr = [row];
+        let rowTotal = 0;
+        ordered.forEach(col => {
+          if (row === col) rowArr.push('-');
+          else {
+            const key = [row,col].sort().join('-');
+            const count = pairs[key] || 0;
+            rowArr.push(count > 0 ? count : '');
+            rowTotal += count;
+          }
+        });
+        rowArr.push(rowTotal);
+        rows.push(rowArr);
+      });
+      const footer = ["配對次數 (列)"];
+      let grandTotal = 0;
+      ordered.forEach(col => {
+        const colTotal = ordered.reduce((acc,row)=> acc + (pairs[[row,col].sort().join('-')]||0), 0);
+        footer.push(colTotal);
+        grandTotal += colTotal;
+      });
+      footer.push(grandTotal);
+      rows.push(footer);
+
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'pair_matrix.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadMatrixXLSX() {
+      const matrixDiv = document.getElementById('matrix');
+      if (!matrixDiv.dataset.csv) return;
+      const data = JSON.parse(matrixDiv.dataset.csv);
+      const ordered = data.ordered;
+      const pairs = data.countsMap;
+
+      const ws_data = [];
+      ws_data.push(["", ...ordered, "配對次數 (行)"]);
+      ordered.forEach(row => {
+        const rowArr = [row];
+        let rowTotal = 0;
+        ordered.forEach(col => {
+          if (row === col) rowArr.push('-');
+          else {
+            const key = [row,col].sort().join('-');
+            const count = pairs[key] || 0;
+            rowArr.push(count > 0 ? count : '');
+            rowTotal += count;
+          }
+        });
+        rowArr.push(rowTotal);
+        ws_data.push(rowArr);
+      });
+      const footer = ["配對次數 (列)"];
+      let grandTotal = 0;
+      ordered.forEach(col => {
+        const colTotal = ordered.reduce((acc,row)=> acc + (pairs[[row,col].sort().join('-')]||0), 0);
+        footer.push(colTotal);
+        grandTotal += colTotal;
+      });
+      footer.push(grandTotal);
+      ws_data.push(footer);
+
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "矩陣表");
+      XLSX.writeFile(wb, "pair_matrix.xlsx");
     }
 
     renderPeopleInputs();
+    renderMatrix(people.map(n => (n||'').trim()).filter(Boolean), parseHistoryCounts(), []);
   </script>
 </body>
 </html>

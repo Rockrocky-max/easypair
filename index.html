@@ -4,29 +4,37 @@
   <meta charset="UTF-8">
   <title>演練組合配對產生器</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    input, textarea, label, select { margin: 5px; padding: 5px; }
-    button { margin: 5px; padding: 6px 12px; cursor: pointer; }
+    body { font-family: Arial, sans-serif; padding: 20px; margin:0; }
+    input, textarea, label, select, button { margin: 5px; padding: 8px; font-size: 16px; }
+    button { cursor: pointer; border-radius: 6px; border: 1px solid #ccc; background:#f9f9f9; }
+    button:hover { background:#eee; }
     .pair { margin: 5px 0; }
     #history { width: 100%; height: 140px; }
     .muted { color: #666; font-size: 12px; }
-    table { border-collapse: collapse; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: center; min-width: 60px; }
+    table { border-collapse: collapse; margin-top: 20px; min-width: 600px; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; }
     th { background: #f0f0f0; }
     .highlight { background: #c8f7c5; }
+    .responsive-table { overflow-x: auto; }
+    .people-inputs { display: flex; flex-wrap: wrap; gap: 5px; }
+    .people-inputs input { flex: 1 1 calc(50% - 10px); min-width: 120px; }
+    @media (max-width: 600px) {
+      input, textarea, label, select, button { font-size: 14px; padding: 6px; }
+      .people-inputs input { flex: 1 1 100%; }
+    }
   </style>
 </head>
 <body>
   <h2>演練組合配對產生器</h2>
 
   <h3>人員名單</h3>
-  <div id="peopleList"></div>
+  <div id="peopleList" class="people-inputs"></div>
   <button onclick="addPerson()">➕ 新增人員</button>
   <button onclick="removePerson()">➖ 刪除人員</button>
   <div class="muted">小提醒：空白姓名不會被列入配對。</div>
 
   <h3>歷史配對紀錄 (請輸入過去組合，用逗號或換行分隔)</h3>
-  <textarea id="history" placeholder="例：第1週 柳逸家-吳習賓, 張喬涵-郭瀞月"></textarea>
+  <textarea id="history" placeholder="例：第1週 A-B, C-D"></textarea>
 
   <h3>設定</h3>
   <label>
@@ -47,14 +55,10 @@
       <option value="count_desc">依配對次數（高→低）</option>
       <option value="count_asc">依配對次數（低→高）</option>
     </select>
-    <label>
-      <input type="checkbox" id="filterNonZero" onchange="onSortChange()"> 只看大於 0 次
-    </label>
-    <label>
-      <input type="checkbox" id="filterNewOnly" onchange="onSortChange()"> 只看當週新配對
-    </label>
+    <label><input type="checkbox" id="filterNonZero" onchange="onSortChange()"> 只看大於 0 次</label>
+    <label><input type="checkbox" id="filterNewOnly" onchange="onSortChange()"> 只看當週新配對</label>
   </div>
-  <div id="matrix"></div>
+  <div class="responsive-table"><div id="matrix"></div></div>
   <div style="margin-top:8px">
     <button onclick="downloadMatrixCSV()">⬇️ 下載矩陣 (CSV)</button>
     <button onclick="downloadMatrixXLSX()">⬇️ 下載矩陣 (Excel)</button>
@@ -63,7 +67,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script>
     const peopleListDiv = document.getElementById('peopleList');
-    let people = ["柳逸家", "吳習賓", "張喬涵", "郭瀞月", "林苡姍", "鄔宜樺", "呂文勝", "許雅嵐", "蔡岢翰", "陳彥萍", "陳紫璇", "楊文益"];
+    let people = Array(12).fill('');
     let latestNewPairs = [];
 
     function renderPeopleInputs() {
@@ -102,7 +106,7 @@
     function parseHistoryCounts() {
       const text = document.getElementById('history').value;
       const tokens = text.split(/\n/).map(s => s.trim()).filter(Boolean);
-      const counts = {}; // key -> count
+      const counts = {};
       tokens.forEach(line => {
         const parts = line.replace(/^第\d+週\s*/, '').split(',');
         parts.forEach(p => {
@@ -362,5 +366,4 @@
     renderPeopleInputs();
     renderMatrix(people.map(n => (n||'').trim()).filter(Boolean), parseHistoryCounts(), []);
   </script>
-</body>
-</html>
+</body
